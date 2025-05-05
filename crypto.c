@@ -9,17 +9,21 @@
 
 
 
-static char* cipher_key = NULL;
-static uint32_t size_key = 0;
+static key_record* keys = NULL;
+static uint32_t key_count = 0;
 
-static void xor_bytes(char* buf, uint32_t size);
+static void xor_bytes(char* cipher_key, uint32_t cipher_size, char* buf, uint32_t size);
 
-void encrypt(char* buf, uint32_t size) {
-    xor_bytes(buf, size);
+uint32_t encrypt(int enc_id, char* buf, uint32_t size) {
+    key_record* key = keys + enc_id;
+    xor_bytes(key->cipher_key, key->size_key, buf, size);
+    return size;
 }
 
-void decrypt(char* buf, uint32_t size) {
-    xor_bytes(buf, size);
+uint32_t decrypt(int enc_id, char* buf, uint32_t size) {
+    key_record* key = keys + enc_id;
+    xor_bytes(key->cipher_key, key->size_key, buf, size);
+    return size;
 }
 
 encryptor_type_t get_type(void) {
@@ -27,6 +31,12 @@ encryptor_type_t get_type(void) {
 }
 
 int set_params(const char* json_str) {
+    char* current_cipher_key = NULL;
+    uint32_t current_size_key = 0;
+    char* length_value = NULL;
+    key_record* key = NULL;
+    int ret = 0;
+
     json_value_t json_root = json_from_string(json_str);
     if (!json_root) {
         return -1;
@@ -39,64 +49,91 @@ int set_params(const char* json_str) {
     }
 
     json_value_t element = json_object_get_element(json_root_msg, "key_length");
-    char* value = NULL;
     if (!element) {
+        ret = -1;
         goto err;
     }
 
     if (element->type != STRING) {
+        ret = -1;
         goto err;
     }
 
     //parse key length
-    value = (char*)(element->value);
-    if (sscanf(value, "%u", &size_key) != 1) {
+    length_value = (char*)(element->value);
+    if (sscanf(length_value, "%u", &current_size_key) != 1) {
+        ret = -1;
         goto err;
     }
 
-    cipher_key = (char*)malloc(sizeof(char) * size_key);
-
-    if (!cipher_key) {
+    //parse key
+    current_cipher_key = (char*)malloc(sizeof(char) * current_size_key);
+    if (!current_cipher_key) {
+        ret = -1;
         goto err;
     }
 
     element = json_object_get_element(json_root_msg, "key");
     if (!element) {
+        ret = -1;
         goto err;
     }
 
     if (element->type != STRING) {
+        ret = -1;
         goto err;
     }
 
-    memcpy(cipher_key, element->value, sizeof(char) * size_key);
+    memcpy(current_cipher_key, element->value, sizeof(char) * current_size_key);
 
-    return 0;
+    //alloc new key
+    keys = (key_record*)realloc(keys, sizeof(key_record) * (key_count + 1));
 
-err:
-    json_object_clear(json_root_msg);
-    free(json_root);
-    return -1;
-}
-
-static void xor_bytes(char* buf, uint32_t size) {
-    uint32_t count = size / size_key;
-    uint32_t left = size % size_key;
-    uint32_t index = 0;
-
-    //main part
-    for (uint32_t i = 0; i < count; ++i) {
-        for (uint32_t j = 0; j < size_key; ++j) {
-            //xor bytes
-            buf[index] ^= cipher_key[j];
-            ++index;
-        }
+    if (!keys) {
+        ret = -2;
+        goto err;
     }
 
-    //left part
-    for (uint32_t j = 0; j < left; ++j) {
-        //xor bytes
-        buf[index] ^= cipher_key[j];
-        ++index;
+    key = keys + key_count;
+    //alloc cipher_key for key record
+    key->cipher_key = (char*)malloc(sizeof(char) * current_size_key);
+    if (!key->cipher_key) {
+        ret = -3;
+        goto err;
+    }
+
+    memcpy(key->cipher_key, current_cipher_key, sizeof(char) * current_size_key);
+    key->size_key = current_size_key;
+    ++key_count;
+
+    free(current_cipher_key);
+
+    return (key_count - 1);
+
+err:
+    if (current_cipher_key) {
+        free(current_cipher_key);
+    }
+
+    json_object_clear(json_root_msg);
+    free(json_root);
+    return ret;
+}
+
+static void xor_bytes(char* cipher_key, uint32_t cipher_size, char* buf, uint32_t size) {
+    char* cur_cipher_key = cipher_key;
+    uint32_t cur_cipher_size = cipher_size;
+
+    while (size) {
+        if (!cur_cipher_size) {
+            cur_cipher_key = cipher_key;
+            cur_cipher_size = cipher_size;
+        }
+
+        *buf ^= *cur_cipher_key;
+        ++buf;
+        ++cur_cipher_key;
+        --cur_cipher_size;
+        --size;
     }
 }

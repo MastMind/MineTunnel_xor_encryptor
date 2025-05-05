@@ -1,8 +1,8 @@
 CC=g++
 #CFLAGS=-c -fPIC -Wall -Werror -g
 #LDFLAGS=-shared -g
-CFLAGS=-c -fPIC -Wall -Werror
-LDFLAGS=-shared
+CFLAGS=-c -fPIC -Wall -Werror -s -fvisibility=hidden
+LDFLAGS=-shared -s
 SOURCES=*.c
 OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
 EXECUTABLE=xor_encrypt.so
